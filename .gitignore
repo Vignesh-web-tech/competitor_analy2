@@ -1,0 +1,15 @@
+# Virtual environment
+venv/
+.venv/
+# Secrets
+.env
+# Python cache
+__pycache__/
+*.pyc
+
+# Local data (cache, vector DB, saved competitors)
+data/
+sample_ocr_test.png
+.DS_Store
+Thumbs.db
+.vscode/

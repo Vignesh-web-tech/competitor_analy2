@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Competitor Analyzer</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: system-ui, sans-serif;
+            margin: 0;
+            background: #f4f5f7;
+            color: #1c1e21;
+        }
+
+        .wrap {
+            max-width: 980px;
+            margin: 0 auto;
+            padding: 24px 16px 60px;
+        }
+
+        h1 {
+            margin: 0 0 4px;
+        }
+
+        .sub {
+            color: #666;
+            margin-bottom: 24px;
+        }
+
+        .card {
+            background: #fff;
+            border-radius: 10px;
+            padding: 18px;
+            margin-bottom: 18px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, .08);
+        }
+
+        h2 {
+            margin: 0 0 12px;
+            font-size: 18px;
+        }
+
+        input[type=text] {
+            padding: 10px;
+            border: 1px solid #ccd0d5;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        button {
+            padding: 10px 16px;
+            border: 0;
+            border-radius: 6px;
+            background: #2563eb;
+            color: #fff;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        button.secondary {
+            background: #e5e7eb;
+            color: #111;
+        }
+
+        button.danger {
+            background: #dc2626;
+        }
+
+        button:disabled {
+            opacity: .5;
+            cursor: not-allowed;
+        }
+
+        .row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .grow {
+            flex: 1;
+            min-width: 180px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        td,
+        th {
+            text-align: left;
+            padding: 8px 6px;
+            border-bottom: 1px solid #eee;
+            font-size: 14px;
+        }
+
+        .badge {
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 12px;
+            background: #e5e7eb;
+        }
+
+        .badge.done {
+            background: #dcfce7;
+            color: #166534;
+        }
+
+        .badge.running,
+        .badge.queued {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .badge.error {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .comp {
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 12px;
+        }
+
+        .comp h3 {
+            margin: 0 0 4px;
+        }
+
+        .score {
+            color: #2563eb;
+            font-weight: 600;
+        }
+
+        .snippet {
+            font-size: 13px;
+            color: #444;
+            margin: 6px 0;
+            padding-left: 10px;
+            border-left: 3px solid #d1d5db;
+        }
+
+        .snippet a {
+            font-size: 12px;
+        }
+
+        pre.analysis {
+            white-space: pre-wrap;
+            font-family: inherit;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .muted {
+            color: #777;
+            font-size: 13px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="wrap">
+        <h1>Competitor Analyzer</h1>
+        <div class="sub">Scrape competitor websites, cache them, and ask questions with RAG.</div>
+
+        <div class="card">
+            <h2>1. Competitors</h2>
+            <div class="row" style="margin-bottom:12px">
+                <input type="text" id="cName" class="grow" placeholder="Competitor name (e.g. Acme)" />
+                <input type="text" id="cUrl" class="grow" placeholder="Website URL (e.g. https://acme.com)" />
+                <button onclick="addCompetitor()">Add</button>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Website</th>
+                        <th>Status</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="compBody"></tbody>
+            </table>
+            <div class="row" style="margin-top:12px">
+                <button onclick="ingest('', false)">Scrape all (use cache)</button>
+                <button class="secondary" onclick="ingest('', true)">Scrape all (force refresh)</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>2. Ask a question</h2>
+            <div class="row">
+                <input type="text" id="query" class="grow" placeholder="e.g. Which competitors offer a free plan?"
+                    onkeydown="if(event.key==='Enter') runSearch()" />
+                <button id="searchBtn" onclick="runSearch()">Search</button>
+            </div>
+            <div class="muted" style="margin-top:8px">Tip: scrape the competitors first, then search.</div>
+            <div id="results" style="margin-top:16px"></div>
+        </div>
+
+        <div class="card">
+            <h2>3. Cache</h2>
+            <div id="cacheStats" class="muted" style="margin-bottom:10px">Loading...</div>
+            <div class="row">
+                <button class="secondary" onclick="cacheAction('purge-expired')">Purge expired</button>
+                <button class="danger" onclick="cacheAction('clear')">Clear all cache</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+        async function api(path, options) {
+            const res = await fetch(path, options);
+            if (!res.ok) {
+                let detail = res.statusText;
+                try { detail = (await res.json()).detail || detail; } catch (e) { }
+                throw new Error(detail);
+            }
+            return res.json();
+        }
+
+        async function loadCompetitors() {
+            const [items, status] = await Promise.all([api('/api/competitors'), api('/api/ingest/status')]);
+            const body = document.getElementById('compBody');
+            if (!items.length) {
+                body.innerHTML = '<tr><td colspan="4" class="muted">No competitors yet. Add one above.</td></tr>';
+                return;
+            }
+            body.innerHTML = items.map((c) => {
+                const s = status[c.name];
+                const badge = s
+                    ? `<span class="badge ${s.state}">${s.state}</span> <span class="muted">${s.pages} pages, ${s.chunks} chunks ${s.error ? '- ' + esc(s.error) : ''}</span>`
+                    : '<span class="badge">not scraped</span>';
+                return `<tr>
+      <td>${esc(c.name)}</td>
+      <td><a href="${esc(c.url)}" target="_blank">${esc(c.url)}</a></td>
+      <td>${badge}</td>
+      <td class="row">
+        <button class="secondary" onclick="ingest('${encodeURIComponent(c.name)}', false)">Scrape</button>
+        <button class="danger" onclick="removeCompetitor('${encodeURIComponent(c.name)}')">Delete</button>
+      </td></tr>`;
+            }).join('');
+        }
+
+        async function addCompetitor() {
+            const name = document.getElementById('cName').value;
+            const url = document.getElementById('cUrl').value;
+            try {
+                await api('/api/competitors', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, url }),
+                });
+                document.getElementById('cName').value = '';
+                document.getElementById('cUrl').value = '';
+                loadCompetitors();
+            } catch (e) { alert(e.message); }
+        }
+
+        async function removeCompetitor(name) {
+            if (!confirm('Delete this competitor and its indexed data?')) return;
+            await api('/api/competitors/' + name, { method: 'DELETE' });
+            loadCompetitors();
+        }
+
+        async function ingest(name, force) {
+            try {
+                const q = new URLSearchParams();
+                if (name) q.set('name', decodeURIComponent(name));
+                if (force) q.set('force', 'true');
+                await api('/api/ingest?' + q.toString(), { method: 'POST' });
+                loadCompetitors();
+            } catch (e) { alert(e.message); }
+        }
+
+        async function runSearch() {
+            const query = document.getElementById('query').value.trim();
+            if (!query) return;
+            const btn = document.getElementById('searchBtn');
+            const box = document.getElementById('results');
+            btn.disabled = true;
+            box.innerHTML = '<div class="muted">Searching and analyzing...</div>';
+            try {
+                const data = await api('/api/search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query, top_k: 5, with_analysis: true }),
+                });
+                if (!data.competitors.length) {
+                    box.innerHTML = '<div class="muted">No results. Scrape some competitors first.</div>';
+                } else {
+                    let html = '';
+                    if (data.analysis) {
+                        html += `<div class="comp"><h3>AI analysis</h3><pre class="analysis">${esc(data.analysis)}</pre></div>`;
+                    }
+                    html += '<h3>Matching competitors</h3>';
+                    html += data.competitors.map((c) => `
+        <div class="comp">
+          <h3>${esc(c.competitor)} <span class="score">score ${c.score}</span></h3>
+          <div class="muted"><a href="${esc(c.website)}" target="_blank">${esc(c.website)}</a></div>
+          ${c.evidence.map((e) => `
+            <div class="snippet">${esc(e.snippet)}<br/><a href="${esc(e.url)}" target="_blank">${esc(e.title || e.url)}</a></div>
+          `).join('')}
+        </div>`).join('');
+                    box.innerHTML = html;
+                }
+            } catch (e) {
+                box.innerHTML = `<div class="muted">Error: ${esc(e.message)}</div>`;
+            } finally {
+                btn.disabled = false;
+                loadCache();
+            }
+        }
+
+        async function loadCache() {
+            const s = await api('/api/cache/stats');
+            document.getElementById('cacheStats').textContent =
+                `Entries: ${s.entries} | Size: ${s.size_kb} KB | TTL: ${s.ttl_seconds}s | Hits: ${s.hits} | Misses: ${s.misses} | Hit rate: ${s.hit_rate}`;
+        }
+
+        async function cacheAction(action) {
+            await api('/api/cache/' + action, { method: 'POST' });
+            loadCache();
+        }
+
+        loadCompetitors();
+        loadCache();
+        setInterval(loadCompetitors, 4000);
+    </script>
+</body>
+
+</html>
